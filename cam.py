@@ -31,16 +31,23 @@ class PupilDetector:
             'pupil_max_ratio': 0.1,   # Maximum pupil size relative to eye region
             'staring_threshold': 0.25, # Threshold for determining staring
             'smoothing_factor': 0.2,  # Smoothing factor for pupil position (0.0 - 1.0)
+            'hysteresis_frames': 3,   # Number of consecutive frames for hysteresis
         }
         
         # Initialize previous pupil positions for smoothing
         self.prev_left_pupil = None
         self.prev_right_pupil = None
         
-        # Initialize state for staring detection
+        # Initialize state for staring detection with hysteresis
         self.staring_state = {
-            "left": False,
-            "right": False
+            "left": {
+                "state": False,
+                "count": 0
+            },
+            "right": {
+                "state": False,
+                "count": 0
+            }
         }
 
     def preprocess_eye_region(self, eye_roi_gray: np.ndarray) -> np.ndarray:
@@ -224,15 +231,24 @@ class PupilDetector:
                     else:
                         gaze_vector_normalized = gaze_vector
 
-                    # Update staring state for current eye
+                    # Update staring state for current eye with hysteresis
+                    eye_state = self.staring_state["left" if i == 0 else "right"]
+
                     if gaze_vector_normalized[0] > self.detection_params['staring_threshold']:
-                        self.staring_state["left" if i == 0 else "right"] = True
+                        eye_state["count"] += 1
+                        if eye_state["count"] >= self.detection_params['hysteresis_frames']:
+                            eye_state["state"] = True
                     else:
-                        self.staring_state["left" if i == 0 else "right"] = False
+                        eye_state["count"] -= 1
+                        if eye_state["count"] <= -self.detection_params['hysteresis_frames']:
+                            eye_state["state"] = False
+
+                    # Limit the count between -hysteresis_frames and hysteresis_frames
+                    eye_state["count"] = max(-self.detection_params['hysteresis_frames'], min(self.detection_params['hysteresis_frames'], eye_state["count"]))
 
                     # Determine text and color based on current eye's staring state
-                    staring_text = "Staring" if self.staring_state["left" if i == 0 else "right"] else "Not Staring"
-                    text_color = (0, 255, 0) if self.staring_state["left" if i == 0 else "right"] else (0, 0, 255)
+                    staring_text = "Staring" if eye_state["state"] else "Not Staring"
+                    text_color = (0, 255, 0) if eye_state["state"] else (0, 0, 255)
 
                     cv2.putText(frame, staring_text, (x_min, y_min - 10), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, text_color, 2)
